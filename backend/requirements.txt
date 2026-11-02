@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+pymupdf
+pyjwt
+python-multipart
+email-validator
+google-auth
+cachetools
+httpx
+requests

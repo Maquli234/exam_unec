@@ -1,0 +1,113 @@
+<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Exam</title><link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#4f46e5">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Exam"><meta name="apple-mobile-web-app-status-bar-style" content="default"><link rel="apple-touch-icon" href="/icon-180.png">
+<style>
+:root{--bg:#f1f4f9;--card:#fff;--tx:#18202b;--mut:#6b7788;--bd:#dde3ec;--ac:#4f46e5;--ok:#16a34a;--bad:#dc2626;--okb:#dcfce7;--badb:#fee2e2;--sh:0 1px 3px rgba(20,30,50,.08),0 6px 20px rgba(20,30,50,.05)}
+[data-t=dark]{--bg:#0e1218;--card:#171d26;--tx:#e8ecf2;--mut:#93a0b2;--bd:#283240;--ac:#818cf8;--okb:#11321e;--badb:#3b1616;--sh:0 1px 3px rgba(0,0,0,.4)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{position:sticky;top:0;z-index:20;display:flex;gap:6px;align-items:center;padding:8px 12px;padding-top:calc(8px + env(safe-area-inset-top));background:var(--card);border-bottom:1px solid var(--bd)}
+header b{flex:1;font-size:17px}#tm{font-weight:700;font-variant-numeric:tabular-nums;font-size:17px;margin-right:4px}
+#pg{position:sticky;top:50px;z-index:19;height:3px;background:var(--bd)}#pg i{display:block;height:100%;width:0;background:var(--ac);transition:width .3s}
+main{max-width:780px;margin:14px auto;padding:0 12px 96px}main.wide{max-width:900px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:12px;box-shadow:var(--sh)}
+button,input,select{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:8px 12px;outline:none}
+input:focus,select:focus{border-color:var(--ac)}button{cursor:pointer;transition:.12s}button:active{transform:scale(.97)}button:disabled{opacity:.45;cursor:default}
+button.p{background:var(--ac);border-color:var(--ac);color:#fff;font-weight:600}button.ic{padding:6px 10px}
+h3{margin:0 0 10px;font-size:16px}label{display:block;margin:10px 0 4px;color:var(--mut);font-size:13px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}.pair input,.card select{width:100%}
+.home{display:grid;gap:12px}@media(min-width:820px){.home{grid-template-columns:1.2fr 1fr;align-items:start}.home .card{margin:0}}
+.err{color:var(--bad);margin:6px 0;font-size:14px}.mut{color:var(--mut)}.big{font-size:34px;font-weight:800}
+.grid{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px}.grid button{min-width:38px;padding:5px 8px;font-size:13px;border-radius:8px}
+.g-ok{background:var(--okb)!important;border-color:var(--ok)!important}.g-bad{background:var(--badb)!important;border-color:var(--bad)!important}.g-ans{background:var(--bd)!important}.g-cur{outline:2px solid var(--ac);outline-offset:1px}
+#qc{scroll-margin-top:62px}.qh{color:var(--mut);font-size:13px;margin-bottom:6px}.qt{font-size:17px;font-weight:600;margin:0 0 12px;white-space:pre-wrap}
+.opt{display:flex;gap:10px;width:100%;text-align:left;margin:7px 0;padding:11px 12px;border-radius:12px;line-height:1.35}
+.opt i{flex:none;width:24px;height:24px;border-radius:50%;background:var(--bg);display:grid;place-items:center;font:600 12px system-ui;font-style:normal;color:var(--mut)}
+.opt.sel{border-color:var(--ac);box-shadow:0 0 0 1px var(--ac)}.opt.ok{background:var(--okb);border-color:var(--ok)}.opt.bad{background:var(--badb);border-color:var(--bad)}
+.opt:disabled{opacity:1;cursor:default}
+.bar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--card);border-top:1px solid var(--bd);padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
+.bar div{max-width:780px;margin:0 auto;display:flex;gap:6px}.bar button{padding:11px 6px;font-size:14px;line-height:1.15;flex:1}.bar .ar{flex:.45;font-size:18px}.bar .sv{flex:1.6}
+.sv.add{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600}.sv.del{background:var(--bad);border-color:var(--bad);color:#fff;font-weight:600}
+.fin{background:var(--ac)!important;border-color:var(--ac)!important;color:#fff!important;font-weight:600}
+@media(max-width:480px){.qt{font-size:16px}.card{padding:13px}.opt{padding:10px}}
+</style></head><body>
+<header><b id=ttl>Exam</b><span id=tm></span><button class=ic id=bt onclick=toggleTheme()>◐</button><button class=ic id=bl onclick=toggleLang()>RU/AZ</button><button class=ic id=bo onclick=logout() hidden></button></header>
+<div id=pg hidden><i></i></div><main id=app></main><div class=bar id=bar hidden><div></div></div>
+<script>
+const T={ru:{login:'Войти',or:'или',ios:'Чтобы добавить иконку на телефон: в Safari нажмите «Поделиться» ⬆︎ → «На экран „Домой“»',reg:'Регистрация',email:'Email',pass:'Пароль (мин. 8)',name:'Имя',out:'Выйти',bank:'Файл с вопросами',from:'С номера',to:'По номер',cnt:'Кол-во вопросов',dur:'Время (мин, до 300)',mode:'Показ ответов',imm:'Сразу',end:'В конце',start:'Начать экзамен',saved:'СОХРАНЕННЫЕ',savedN:'Сохранено вопросов',q:'Вопрос',inFile:'в файле',save:'Сохранить',unsave:'Удалить из сохранённых',fin:'Закончить экзамен',res:'Результат',of:'из',wrong:'Ошибки (№ в файле)',none:'Нет ошибок 🎉',again:'На главную',adm:'Админ-панель',up:'Загрузить файл',upName:'Название',done:'Загружено',review2:'На проверку (№)',noBank:'Банков пока нет — админ должен загрузить файл',unans:'без ответа',time:'Время вышло'},
+az:{login:'Daxil ol',or:'və ya',ios:'Telefonda ikonka əlavə etmək üçün Safari-də «Paylaş» ⬆︎ → «Əsas ekrana əlavə et»',reg:'Qeydiyyat',email:'Email',pass:'Parol (min. 8)',name:'Ad',out:'Çıxış',bank:'Sual faylı',from:'Nömrədən',to:'Nömrəyə qədər',cnt:'Sualların sayı',dur:'Vaxt (dəq, max 300)',mode:'Cavabların göstərilməsi',imm:'Dərhal',end:'Sonda',start:'İmtahana başla',saved:'SAXLANILANLAR',savedN:'Saxlanılan suallar',q:'Sual',inFile:'faylda',save:'Saxla',unsave:'Saxlanılanlardan sil',fin:'İmtahanı Bitir',res:'Nəticə',of:'/',wrong:'Səhvlər (faylda №)',none:'Səhv yoxdur 🎉',again:'Ana səhifə',adm:'Admin panel',up:'Fayl yüklə',upName:'Ad',done:'Yükləndi',review2:'Yoxlama üçün (№)',noBank:'Hələ bank yoxdur — admin fayl yükləməlidir',unans:'cavabsız',time:'Vaxt bitdi'}};
+let lang=localStorage.lang||'ru',theme=localStorage.theme||'light',tok=JSON.parse(localStorage.tok||'null'),user=null,E=null,timer=null;
+const t=k=>T[lang][k],$=id=>document.getElementById(id),L='ABCDEFGH';
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function chrome(){document.documentElement.dataset.t=theme;$('bo').textContent=t('out');$('bo').hidden=!tok}
+function toggleTheme(){theme=theme=='dark'?'light':'dark';localStorage.theme=theme;chrome()}
+function toggleLang(){lang=lang=='ru'?'az':'ru';localStorage.lang=lang;chrome();E&&!E.done?draw(false):route()}
+async function api(path,opt={},retry=true){
+  const h={...(opt.headers||{})};if(tok)h.Authorization='Bearer '+tok.access_token;
+  if(opt.json){h['Content-Type']='application/json';opt.body=JSON.stringify(opt.json)}
+  const r=await fetch(path,{...opt,headers:h});
+  if(r.status==401&&tok&&retry&&!path.startsWith('/auth')){
+    const rr=await fetch('/auth/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({refresh_token:tok.refresh_token})});
+    if(rr.ok){tok=await rr.json();localStorage.tok=JSON.stringify(tok);return api(path,opt,false)}
+    logout();throw Error('auth')}
+  const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(typeof d.detail=='string'?d.detail:'error');return d}
+function logout(){if(tok)fetch('/auth/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({refresh_token:tok.refresh_token})});tok=null;user=null;E=null;localStorage.removeItem('tok');clearInterval(timer);$('tm').textContent='';chrome();route()}
+function shell(wide){$('app').className=wide?'wide':'';$('bar').hidden=true;$('pg').hidden=true}
+async function route(){chrome();shell();if(!tok)return authView();if(!user)user=await api('/me').catch(()=>null);if(!user)return authView();home()}
+function authView(reg=false){$('app').innerHTML=`<div class=card style="max-width:400px;margin:40px auto"><div class=pair><button class="${reg?'':'p'}" onclick=authView(false)>${t('login')}</button><button class="${reg?'p':''}" onclick=authView(true)>${t('reg')}</button></div>
+${reg?`<label>${t('name')}</label><input id=n style="width:100%">`:''}<label>${t('email')}</label><input id=e type=email style="width:100%"><label>${t('pass')}</label><input id=p type=password style="width:100%">
+<div class=err id=er></div><button class=p style="width:100%;margin-top:8px" onclick="auth(${reg})">${reg?t('reg'):t('login')}</button><div class=mut style="text-align:center;margin:12px 0 8px">${t('or')}</div><div id=gbtn style="display:flex;justify-content:center;min-height:44px"></div></div>`;initGoogle()}
+let cfg=null;
+async function initGoogle(){try{cfg=cfg||await (await fetch('/config')).json();if(!cfg.google_client_id||!$('gbtn'))return;
+ if(!window.google)await new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://accounts.google.com/gsi/client';s.onload=ok;s.onerror=no;document.head.appendChild(s)});
+ google.accounts.id.initialize({client_id:cfg.google_client_id,callback:async r=>{try{tok=await api('/auth/google',{method:'POST',json:{id_token:r.credential}});localStorage.tok=JSON.stringify(tok);user=null;route()}catch(e){$('er').textContent=e.message}}});
+ google.accounts.id.renderButton($('gbtn'),{theme:theme=='dark'?'filled_black':'outline',size:'large',width:300,text:'continue_with',locale:lang=='az'?'az':'ru'})}catch(e){}}
+const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent),standalone=navigator.standalone||matchMedia('(display-mode: standalone)').matches;
+const iosHint=()=>isIOS&&!standalone&&!localStorage.hint?`<div class=card style="margin-bottom:12px">${t('ios')}<button class=ic style="float:right;margin-left:8px" onclick="localStorage.hint=1;this.parentNode.remove()">✕</button></div>`:'';
+async function auth(reg){try{tok=await api(reg?'/auth/register':'/auth/login',{method:'POST',json:{email:$('e').value,password:$('p').value,name:reg?$('n').value:''}});localStorage.tok=JSON.stringify(tok);user=null;route()}catch(e){$('er').textContent=e.message}}
+async function home(){
+  shell(true);const banks=await api('/banks'),sc=(await api('/saved/count')).count;
+  const opts=`<option value=immediate>${t('imm')}</option><option value=end>${t('end')}</option>`;
+  $('app').innerHTML=`${iosHint()}<div class=home><div>
+  <div class=card><h3>${esc(user.name)} <span class=mut style="font-weight:400;font-size:13px">${esc(user.email)}</span></h3>${banks.length?`<label>${t('bank')}</label><select id=b onchange=bankChanged()>${banks.map(b=>`<option value=${b.id} data-min=${b.min} data-max=${b.max}>${esc(b.name)} (${b.count})</option>`).join('')}</select>
+  <div class=pair><div><label>${t('from')}</label><input id=f type=number min=1></div><div><label>${t('to')}</label><input id=to type=number min=1></div></div>
+  <div class=pair><div><label>${t('cnt')}</label><input id=c type=number min=1 value=50></div><div><label>${t('dur')}</label><input id=d type=number min=1 max=300 value=60></div></div>
+  <label>${t('mode')}</label><select id=m>${opts}</select><div class=err id=er></div>
+  <button class=p style="width:100%;margin-top:12px;padding:11px" onclick="startExam('bank')">${t('start')}</button>`:`<span class=mut>${t('noBank')}</span>`}</div></div>
+  <div><div class=card><h3>${t('savedN')}: ${sc}</h3><div class=pair><div><label>${t('cnt')}</label><input id=sc type=number min=1 value=${Math.max(sc,1)}></div><div><label>${t('dur')}</label><input id=sd type=number min=1 max=300 value=60></div></div>
+  <label>${t('mode')}</label><select id=sm>${opts}</select><button ${sc?'':'disabled'} style="width:100%;margin-top:12px;padding:11px" onclick="startExam('saved')">${t('saved')}</button></div>
+  ${user.is_admin?`<div class=card style="margin-top:12px"><h3>${t('adm')}</h3><label>${t('upName')}</label><input id=un style="width:100%"><label>${t('up')} (PDF / TXT)</label><input id=uf type=file accept=".pdf,.txt" style="width:100%"><div id=ur class=mut style="margin-top:6px"></div><button style="margin-top:8px" onclick=upload()>${t('up')}</button></div>`:''}</div></div>`;
+  if(banks.length)bankChanged()}
+function bankChanged(){const o=$('b').selectedOptions[0];$('f').value=o.dataset.min;$('to').value=o.dataset.max}
+async function upload(){const f=$('uf').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);
+  try{const r=await api('/admin/banks?name='+encodeURIComponent($('un').value||f.name),{method:'POST',body:fd});
+  $('ur').textContent=`${t('done')}: ${r.questions}. ${t('review2')}: ${r.needs_review.join(', ')||'—'}`;setTimeout(home,2500)}catch(e){$('ur').textContent=e.message}}
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v||a));
+async function startExam(src){
+  const b=src=='saved'?{source:'saved',count:clamp(+$('sc').value,1,9999),duration_min:clamp(+$('sd').value,1,300),answer_mode:$('sm').value}:
+   {source:'bank',bank_id:+$('b').value,from_n:+$('f').value,to_n:+$('to').value,count:clamp(+$('c').value,1,9999),duration_min:clamp(+$('d').value,1,300),answer_mode:$('m').value};
+  try{const [r,ids]=await Promise.all([api('/exams',{method:'POST',json:b}),api('/saved/ids')]);
+   E={...r,cur:0,sel:{},res:{},savedQ:new Set(ids.ids),end:Date.now()+r.duration_sec*1000,done:false};draw(true);clearInterval(timer);timer=setInterval(tick,1000);tick()}catch(e){alert(e.message)}}
+function tick(){const s=Math.max(0,Math.round((E.end-Date.now())/1000)),h=Math.floor(s/3600);$('tm').textContent=(h?h+':':'')+String(Math.floor(s/60)%60).padStart(2,'0')+':'+String(s%60).padStart(2,'0');if(!s&&!E.done){alert(t('time'));finish()}}
+function draw(toQ){
+  shell();const y=scrollY,q=E.questions[E.cur],imm=E.answer_mode=='immediate',r=E.res[q.id],sel=E.sel[q.id],sv=E.savedQ.has(q.id);
+  const gc=(x,i)=>{const R=E.res[x.id];return(i==E.cur?'g-cur ':'')+(R?(R.correct?'g-ok':'g-bad'):(E.sel[x.id]!=null?'g-ans':''))};
+  $('app').innerHTML=`<div class=grid>${E.questions.map((x,i)=>`<button class="${gc(x,i)}" onclick="go(${i})">${i+1}</button>`).join('')}</div>
+  <div class=card id=qc><div class=qh>${t('q')} ${E.cur+1} / ${E.total} · №${q.file_number} ${t('inFile')}</div><p class=qt>${esc(q.text)}</p>
+  ${q.options.map((o,i)=>{let c='opt';if(r&&imm){if(i==r.ci)c+=' ok';else if(i==sel)c+=' bad'}else if(i==sel)c+=' sel';return`<button class="${c}" ${r&&imm?'disabled':''} onclick=pick(${i})><i>${L[i]||i+1}</i><span>${esc(o)}</span></button>`}).join('')}</div>`;
+  $('bar').hidden=false;$('bar').firstElementChild.innerHTML=`<button class=ar onclick=go(${E.cur-1}) ${E.cur?'':'disabled'}>←</button><button class="sv ${sv?'del':'add'}" onclick=toggleSave()>${sv?t('unsave'):t('save')}</button><button class=ar onclick=go(${E.cur+1}) ${E.cur<E.total-1?'':'disabled'}>→</button><button class=fin onclick=finish()>${t('fin')}</button>`;
+  $('pg').hidden=false;$('pg').firstElementChild.style.width=(Object.keys(E.sel).length/E.total*100)+'%';
+  toQ?$('qc').scrollIntoView({block:'start'}):scrollTo(0,y)}
+function go(i){if(i>=0&&i<E.total){E.cur=i;draw(true)}}
+async function pick(i){const q=E.questions[E.cur];if(E.res[q.id]&&E.answer_mode=='immediate')return;E.sel[q.id]=i;
+  try{const r=await api(`/exams/${E.exam_id}/answer`,{method:'POST',json:{question_id:q.id,option_index:i}});if(r.correct!==undefined)E.res[q.id]={correct:r.correct,ci:r.correct_index}}catch(e){delete E.sel[q.id]}draw(false)}
+async function toggleSave(){const q=E.questions[E.cur],on=E.savedQ.has(q.id);
+  try{await api('/saved/'+q.id,{method:on?'DELETE':'POST'});on?E.savedQ.delete(q.id):E.savedQ.add(q.id);draw(false)}catch(e){}}
+async function finish(){if(E.done)return;E.done=true;clearInterval(timer);$('tm').textContent='';const r=await api(`/exams/${E.exam_id}/finish`,{method:'POST'});shell();scrollTo(0,0);
+  $('app').innerHTML=`<div class=card><div class=big>${r.correct} ${t('of')} ${r.total}</div><b>${t('wrong')}:</b>
+  <p>${r.wrong.length?r.wrong.map(w=>`<span class="${w.status=='wrong'?'err':'mut'}">№${w.file_number}${w.status=='unanswered'?' ('+t('unans')+')':''}</span>`).join(', '):t('none')}</p><button class=p onclick=home()>${t('again')}</button></div>
+  <div class=grid>${r.items.map(x=>`<button class="${x.status=='correct'?'g-ok':'g-bad'}" onclick="document.getElementById('i${x.position}').scrollIntoView()">${x.position}</button>`).join('')}</div>
+  ${r.items.map(x=>`<div class=card id=i${x.position} style="scroll-margin-top:62px"><div class=qh>${t('q')} ${x.position} · №${x.file_number} ${t('inFile')}</div><p class=qt>${esc(x.text)}</p>
+  ${x.options.map((o,i)=>`<div class="opt ${i==x.correct_index?'ok':(i==x.given_index?'bad':'')}"><i>${L[i]||i+1}</i><span>${esc(o)}</span></div>`).join('')}</div>`).join('')}`}
+if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
+route();
+</script></body></html>
