@@ -1,10 +1,10 @@
-﻿import os, json, time, uuid, random, hashlib, hmac, tempfile
+import os, re, json, time, uuid, random, hashlib, hmac, tempfile
 from datetime import datetime, timedelta, timezone
 import jwt
 from cachetools import TTLCache
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Header
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import create_engine, Column, Integer, BigInteger, String, Boolean, JSON, DateTime, ForeignKey, Text
+from sqlalchemy import create_engine, inspect, text, select, Column, Integer, BigInteger, String, Boolean, JSON, DateTime, ForeignKey, Text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from .parser import parse_pdf, parse_text, to_dicts
 
@@ -48,7 +48,14 @@ class Exam(Base):
     mode = Column(String); answer_mode = Column(String); duration_sec = Column(Integer)
     started = Column(BigInteger); question_ids = Column(JSON); answers = Column(JSON, default=dict)
     finished = Column(Boolean, default=False)
+    option_orders = Column(JSON, nullable=True)  # {question_id: [исходные индексы в порядке показа]}; пусто = как в файле
 Base.metadata.create_all(engine)
+
+def _migrate():
+    # create_all не добавляет колонки в уже существующие таблицы -> докидываем вручную (на проде БД уже есть)
+    if "option_orders" not in {c["name"] for c in inspect(engine).get_columns("exams")}:
+        with engine.begin() as conn: conn.execute(text("ALTER TABLE exams ADD COLUMN option_orders JSON"))
+_migrate()
 
 app = FastAPI(title="Exam App")
 def db():
@@ -126,7 +133,7 @@ def logout(b: RefreshIn, s: Session = Depends(db)):
 async def upload_bank(file: UploadFile = File(...), name: str = "", _: User = Depends(admin_user), s: Session = Depends(db)):
     raw = await file.read()
     if file.filename.lower().endswith(".pdf"):
-        fd, tmp_path = tempfile.mkstemp(suffix=".pdf"); os.close(fd); open(tmp_path, "wb").write(raw); qs = parse_pdf(tmp_path); os.remove(tmp_path)
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as t: t.write(raw); t.flush(); qs = parse_pdf(t.name)
     else: qs = parse_text(raw.decode("utf-8-sig"))
     if not qs: raise HTTPException(422, "no questions recognized")
     bank = Bank(name=name or file.filename); s.add(bank); s.flush()
@@ -145,6 +152,15 @@ def patch_question(qid: int, b: QuestionPatch, _: User = Depends(admin_user), s:
     if b.text is not None: q.text = b.text
     if b.options is not None: q.options = b.options
     q.needs_review = False; s.commit(); cache.clear(); return {"ok": True}
+@app.delete("/admin/banks/{bank_id}")
+def delete_bank(bank_id: int, _: User = Depends(admin_user), s: Session = Depends(db)):
+    if not s.get(Bank, bank_id): raise HTTPException(404, "bank not found")
+    in_bank = select(Question.id).where(Question.bank_id == bank_id)
+    s.query(Saved).filter(Saved.question_id.in_(in_bank)).delete(synchronize_session=False)  # сначала зависимые строки
+    n = s.query(Question).filter_by(bank_id=bank_id).delete(synchronize_session=False)
+    s.query(Bank).filter_by(id=bank_id).delete(synchronize_session=False)
+    s.commit(); cache.clear()
+    return {"ok": True, "deleted_questions": n}
 @app.get("/banks")
 def banks(_: User = Depends(current_user), s: Session = Depends(db)):
     out = []
@@ -176,13 +192,30 @@ class ExamIn(BaseModel):
     count: int = 50
     duration_min: int = 60
     answer_mode: str = "immediate"  # immediate | end
+    shuffle_options: bool = False   # перемешать варианты ответов внутри вопроса
 
 def _qs(s, ids):
     m = {q.id: q for q in s.query(Question).filter(Question.id.in_(ids))}
-    return [m[i] for i in ids]
-def _public(q, include_correct=False):
-    d = {"id": q.id, "file_number": q.number, "text": q.text, "options": [o["text"] for o in q.options]}
-    if include_correct: d["correct_index"] = next(i for i, o in enumerate(q.options) if o["correct"])
+    return [m[i] for i in ids if i in m]          # вопросы удалённого банка тихо пропускаем
+
+# Варианты вида «все перечисленные» / «ничего из вышеперечисленного» зависят от позиции -> такие вопросы не мешаем
+KEEP_ORDER = re.compile(r"все (вышеперечисл|перечисл|вышеуказ|ответы)|ничего из|ни один из|оба (варианта|ответа)|верны оба|"
+                        r"yuxarıdakıların|hamısı|heç biri|hər ikisi|all of the above|none of the above|both", re.I)
+def _make_orders(qs):
+    orders = {}
+    for q in qs:
+        if len(q.options) < 2 or any(KEEP_ORDER.search(o["text"]) for o in q.options): continue
+        p = list(range(len(q.options))); random.shuffle(p); orders[str(q.id)] = p
+    return orders
+def _opts(q, e):
+    """Варианты вопроса в том порядке, в котором их видит пользователь этого экзамена."""
+    order = (e.option_orders or {}).get(str(q.id)) or range(len(q.options))
+    return [q.options[i] for i in order]
+def _correct(opts): return next(i for i, o in enumerate(opts) if o["correct"])
+def _public(q, e, include_correct=False):
+    opts = _opts(q, e)
+    d = {"id": q.id, "file_number": q.number, "text": q.text, "options": [o["text"] for o in opts]}
+    if include_correct: d["correct_index"] = _correct(opts)
     return d
 
 @app.post("/exams")
@@ -196,12 +229,14 @@ def start_exam(b: ExamIn, u: User = Depends(current_user), s: Session = Depends(
     ids = [q.id for q in pool]
     if not ids: raise HTTPException(404, "no questions in range")
     count = max(1, min(b.count, len(ids)))
-    random.shuffle(ids); ids = ids[:count]            # вразброс
+    random.shuffle(ids); ids = ids[:count]            # порядок вопросов вразброс
+    qs = _qs(s, ids)
     e = Exam(id=uuid.uuid4().hex, user_id=u.id, mode=b.source, answer_mode=b.answer_mode,
-             duration_sec=max(1, min(b.duration_min, 300)) * 60, started=int(time.time()), question_ids=ids, answers={})
+             duration_sec=max(1, min(b.duration_min, 300)) * 60, started=int(time.time()), question_ids=ids, answers={},
+             option_orders=_make_orders(qs) if b.shuffle_options else {})   # порядок вариантов фиксируется на весь экзамен
     s.add(e); s.commit()
     return {"exam_id": e.id, "total": count, "duration_sec": e.duration_sec, "answer_mode": e.answer_mode,
-            "questions": [_public(q) for q in _qs(s, ids)]}   # правильные ответы НЕ отдаются
+            "questions": [_public(q, e) for q in qs]}   # правильные ответы НЕ отдаются
 
 def _own(s, eid, u):
     e = s.get(Exam, eid)
@@ -215,11 +250,15 @@ def answer(eid: str, b: AnswerIn, u: User = Depends(current_user), s: Session = 
     e = _own(s, eid, u)
     if e.finished or _expired(e): raise HTTPException(409, "exam finished")
     if b.question_id not in e.question_ids: raise HTTPException(400, "question not in exam")
+    q = s.get(Question, b.question_id)
+    if not q: raise HTTPException(404, "question was deleted")
+    opts = _opts(q, e)
+    if not 0 <= b.option_index < len(opts): raise HTTPException(400, "bad option index")
     key = str(b.question_id)
     if e.answer_mode == "immediate" and key in e.answers: raise HTTPException(409, "already answered")
     e.answers = {**e.answers, key: b.option_index}; s.commit()
     if e.answer_mode == "immediate":
-        q = s.get(Question, b.question_id); ci = next(i for i, o in enumerate(q.options) if o["correct"])
+        ci = _correct(opts)
         return {"correct": ci == b.option_index, "correct_index": ci}
     return {"recorded": True}
 
@@ -228,10 +267,10 @@ def finish(eid: str, u: User = Depends(current_user), s: Session = Depends(db)):
     e = _own(s, eid, u); e.finished = True; s.commit()
     items, wrong = [], []
     for pos, q in enumerate(_qs(s, e.question_ids), 1):
-        ci = next(i for i, o in enumerate(q.options) if o["correct"]); given = e.answers.get(str(q.id))
+        ci = _correct(_opts(q, e)); given = e.answers.get(str(q.id))
         status = "unanswered" if given is None else ("correct" if given == ci else "wrong")
         if status != "correct": wrong.append({"position": pos, "file_number": q.number, "status": status})
-        items.append({**_public(q, True), "position": pos, "given_index": given, "status": status})
+        items.append({**_public(q, e, True), "position": pos, "given_index": given, "status": status})
     correct = sum(i["status"] == "correct" for i in items)
     return {"correct": correct, "total": len(items), "wrong": wrong, "items": items}
 
@@ -247,4 +286,3 @@ def me(u: User = Depends(current_user)):
 
 from fastapi.staticfiles import StaticFiles
 app.mount("/", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "..", "static"), html=True), name="static")
-
