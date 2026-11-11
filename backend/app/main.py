@@ -4,7 +4,7 @@ import jwt
 from cachetools import TTLCache
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Header
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import create_engine, inspect, text, select, Column, Integer, BigInteger, String, Boolean, JSON, DateTime, ForeignKey, Text
+from sqlalchemy import create_engine, inspect, text, select, func, Column, Integer, BigInteger, String, Boolean, JSON, DateTime, ForeignKey, Text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from .parser import parse_pdf, parse_text, to_dicts
 
@@ -172,6 +172,7 @@ def banks(_: User = Depends(current_user), s: Session = Depends(db)):
 # ---------- saved ----------
 @app.post("/saved/{qid}")
 def save_q(qid: int, u: User = Depends(current_user), s: Session = Depends(db)):
+    if not s.get(Question, qid): raise HTTPException(404, "question not found")
     s.merge(Saved(user_id=u.id, question_id=qid)); s.commit(); return {"saved": True}
 @app.delete("/saved/{qid}")
 def unsave_q(qid: int, u: User = Depends(current_user), s: Session = Depends(db)):
@@ -179,9 +180,18 @@ def unsave_q(qid: int, u: User = Depends(current_user), s: Session = Depends(db)
 @app.get("/saved/ids")
 def saved_ids(u: User = Depends(current_user), s: Session = Depends(db)):
     return {"ids": [r.question_id for r in s.query(Saved).filter_by(user_id=u.id)]}
-@app.get("/saved/count")
-def saved_count(u: User = Depends(current_user), s: Session = Depends(db)):
-    return {"count": s.query(Saved).filter_by(user_id=u.id).count()}
+@app.get("/saved/counts")
+def saved_counts(u: User = Depends(current_user), s: Session = Depends(db)):
+    """Сколько сохранённых у пользователя в каждом предмете: {bank_id: count}."""
+    rows = (s.query(Question.bank_id, func.count()).join(Saved, Saved.question_id == Question.id)
+             .filter(Saved.user_id == u.id).group_by(Question.bank_id).all())
+    return {str(bank_id): n for bank_id, n in rows}
+@app.delete("/saved")
+def clear_saved(bank_id: int, u: User = Depends(current_user), s: Session = Depends(db)):
+    """Очистить сохранённые только одного предмета (остальные не трогаем)."""
+    in_bank = select(Question.id).where(Question.bank_id == bank_id)
+    n = s.query(Saved).filter(Saved.user_id == u.id, Saved.question_id.in_(in_bank)).delete(synchronize_session=False)
+    s.commit(); return {"ok": True, "removed": n}
 
 # ---------- экзамен ----------
 class ExamIn(BaseModel):
@@ -221,7 +231,9 @@ def _public(q, e, include_correct=False):
 @app.post("/exams")
 def start_exam(b: ExamIn, u: User = Depends(current_user), s: Session = Depends(db)):
     if b.source == "saved":
-        pool = s.query(Question).join(Saved, Saved.question_id == Question.id).filter(Saved.user_id == u.id)
+        if b.bank_id is None: raise HTTPException(400, "bank_id required for saved")   # сохранённые всегда в рамках предмета
+        pool = (s.query(Question).join(Saved, Saved.question_id == Question.id)
+                 .filter(Saved.user_id == u.id, Question.bank_id == b.bank_id))
     else:
         pool = s.query(Question).filter_by(bank_id=b.bank_id)
         if b.from_n is not None: pool = pool.filter(Question.number >= b.from_n)
