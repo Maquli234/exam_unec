@@ -17,7 +17,9 @@ if DB_URL.startswith("postgres://"): DB_URL = DB_URL.replace("postgres://", "pos
 elif DB_URL.startswith("postgresql://"): DB_URL = DB_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 engine = create_engine(DB_URL, pool_pre_ping=True, pool_recycle=240,
                        connect_args={"check_same_thread": False} if DB_URL.startswith("sqlite") else {})
-SessionLocal = sessionmaker(bind=engine)
+# expire_on_commit=False: иначе после commit каждый объект перечитывается из БД отдельным запросом
+# (старт экзамена делал по запросу на каждый вопрос: 50 вопросов -> 55 запросов к БД)
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 Base = declarative_base()
 cache = TTLCache(maxsize=256, ttl=300)  # кеш банков вопросов (в проде заменить на Redis)
 
@@ -58,6 +60,8 @@ def _migrate():
 _migrate()
 
 app = FastAPI(title="Exam App")
+from fastapi.middleware.gzip import GZipMiddleware
+app.add_middleware(GZipMiddleware, minimum_size=1000)   # сжатие ответов: экзамен на 50 вопросов и сама страница весят в разы меньше
 def db():
     s = SessionLocal()
     try: yield s
@@ -163,10 +167,13 @@ def delete_bank(bank_id: int, _: User = Depends(admin_user), s: Session = Depend
     return {"ok": True, "deleted_questions": n}
 @app.get("/banks")
 def banks(_: User = Depends(current_user), s: Session = Depends(db)):
+    # один запрос с группировкой вместо выгрузки всех номеров каждого банка отдельным запросом
+    stats = {bid: (n, lo, hi) for bid, n, lo, hi in s.query(Question.bank_id, func.count(), func.min(Question.number),
+                                                           func.max(Question.number)).group_by(Question.bank_id)}
     out = []
     for b in s.query(Bank).all():
-        nums = [n for (n,) in s.query(Question.number).filter_by(bank_id=b.id)]
-        out.append({"id": b.id, "name": b.name, "count": len(nums), "min": min(nums, default=0), "max": max(nums, default=0)})
+        n, lo, hi = stats.get(b.id, (0, 0, 0))
+        out.append({"id": b.id, "name": b.name, "count": n, "min": lo or 0, "max": hi or 0})
     return out
 
 # ---------- saved ----------
@@ -232,13 +239,13 @@ def _public(q, e, include_correct=False):
 def start_exam(b: ExamIn, u: User = Depends(current_user), s: Session = Depends(db)):
     if b.source == "saved":
         if b.bank_id is None: raise HTTPException(400, "bank_id required for saved")   # сохранённые всегда в рамках предмета
-        pool = (s.query(Question).join(Saved, Saved.question_id == Question.id)
+        pool = (s.query(Question.id).join(Saved, Saved.question_id == Question.id)
                  .filter(Saved.user_id == u.id, Question.bank_id == b.bank_id))
     else:
-        pool = s.query(Question).filter_by(bank_id=b.bank_id)
+        pool = s.query(Question.id).filter_by(bank_id=b.bank_id)
         if b.from_n is not None: pool = pool.filter(Question.number >= b.from_n)
         if b.to_n is not None: pool = pool.filter(Question.number <= b.to_n)
-    ids = [q.id for q in pool]
+    ids = [i for (i,) in pool]                         # только id: тексты всего банка тянуть из БД не нужно
     if not ids: raise HTTPException(404, "no questions in range")
     count = max(1, min(b.count, len(ids)))
     random.shuffle(ids); ids = ids[:count]            # порядок вопросов вразброс
