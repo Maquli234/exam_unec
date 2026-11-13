@@ -79,8 +79,17 @@ async function home(){
   <div><div class=card><h3 id=sth></h3><div class=pair><div><label>${t('cnt')}</label><input id=sc type=number min=1 value=1></div><div><label>${t('dur')}</label><input id=sd type=number min=1 max=300 value=60></div></div>
   <label>${t('mode')}</label><select id=sm>${opts}</select><label class=chk><input type=checkbox id=ssh>${t('shuf')}</label><button id=sbtn disabled style="width:100%;margin-top:12px;padding:11px" onclick="startExam('saved')">${t('saved')}</button><button id=sclr hidden style="width:100%;margin-top:8px;padding:9px;color:var(--bad)" onclick=clearSaved()>${t('clr')}</button></div>
   ${user.is_admin?`<div class=card style="margin-top:12px"><h3>${t('adm')}</h3><label>${t('upName')}</label><input id=un style="width:100%"><label>${t('up')} (PDF / TXT)</label><input id=uf type=file accept=".pdf,.txt" style="width:100%"><div id=ur class=mut style="margin-top:6px"></div><button style="margin-top:8px" onclick=upload()>${t('up')}</button>${banks.length?`<h3 style="margin-top:18px">${t('files')}</h3>${banks.map(b=>`<div class=brow><span>${esc(b.name)} <span class=mut>(${b.count})</span></span><button class=ic onclick=delBank(${b.id}) title="${t('delete')}">🗑</button></div>`).join('')}`:''}</div>`:''}</div></div>`;
-  if(banks.length)bankChanged();else renderSaved()}
-function bankChanged(){const o=$('b').selectedOptions[0];$('f').value=o.dataset.min;$('to').value=o.dataset.max;renderSaved()}
+  const hm=document.querySelector('.home');hm.oninput=hm.onchange=saveSel;
+  if(banks.length){FIELDS.forEach(k=>{const el=$(k);if(el&&SEL[k]!=null)el[el.type=='checkbox'?'checked':'value']=SEL[k]});if(banks.some(b=>b.id==SEL.b))$('b').value=SEL.b;bankChanged()}else renderSaved()}
+// выбор экзамена (предмет, интервал для каждого предмета, кол-во, время, режим, вразброс) хранится в localStorage:
+// не слетает при перезагрузке страницы и при выходе из аккаунта (logout удаляет только токен)
+const FIELDS=['c','d','m','sh','sd','sm','ssh'];let SEL={},curB=null;try{SEL=JSON.parse(localStorage.sel||'{}')||{}}catch(e){}
+function saveSel(){if(!$('b'))return;FIELDS.forEach(k=>{const el=$(k);if(el)SEL[k]=el[el.type=='checkbox'?'checked':'value']});
+  SEL.b=curB;(SEL.r=SEL.r||{})[curB]=[$('f').value,$('to').value];try{localStorage.sel=JSON.stringify(SEL)}catch(e){}}
+function bankChanged(){const o=$('b').selectedOptions[0],mn=+o.dataset.min,mx=+o.dataset.max;curB=o.value;   // curB = предмет, чей интервал сейчас в полях
+  let [a,z]=(SEL.r||{})[curB]||[];a=+a||mn;z=+z||mx;   // запомненный интервал, обрезанный по номерам файла; не пересекается -> весь файл
+  if(a>z||a>mx||z<mn)a=mn,z=mx;else a=Math.max(a,mn),z=Math.min(z,mx);
+  $('f').value=a;$('to').value=z;renderSaved()}
 // сохранённые показываем только для выбранного предмета: меняешь предмет -> меняется и карточка
 function renderSaved(){const sel=$('b'),id=sel?+sel.value:0,bk=BANKS.find(x=>x.id==id),n=SC[id]||0;
   $('sth').textContent=`${t('savedN')}${bk?' · '+bk.name:''}: ${n}`;$('sc').value=Math.max(n,1);$('sbtn').disabled=!n;$('sclr').hidden=!n}
