@@ -35,7 +35,7 @@ input[type=checkbox]{width:18px;height:18px;padding:0;flex:none;accent-color:var
 .brow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--bd)}.brow span{overflow-wrap:anywhere}.brow button{color:var(--bad);flex:none}
 @media(max-width:480px){.qt{font-size:16px}.card{padding:13px}.opt{padding:10px}}
 /* длинные куски без пробелов (прочерки ____, ссылки, формулы) переносим: иначе карточка шире экрана и страница ездит по горизонтали */
-.card{overflow-wrap:anywhere}.opt span{min-width:0}
+.card{word-break:break-word;overflow-wrap:anywhere}.opt span{min-width:0}   /* break-word — для iOS старше 15.4, где нет anywhere */
 /* iOS Safari приближает страницу при фокусе на поле со шрифтом меньше 16px и сам не отдаляет */
 @supports(-webkit-touch-callout:none){input,select{font-size:16px}}
 </style></head><body>
@@ -50,14 +50,17 @@ const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[
 function chrome(){document.documentElement.dataset.t=theme;$('bo').textContent=t('out');$('bo').hidden=!tok}
 function toggleTheme(){theme=theme=='dark'?'light':'dark';localStorage.theme=theme;chrome()}
 function toggleLang(){lang=lang=='ru'?'az':'ru';localStorage.lang=lang;chrome();E&&!E.done?draw(false):route()}
+let refreshing=null;
 async function api(path,opt={},retry=true){
   const h={...(opt.headers||{})};if(tok)h.Authorization='Bearer '+tok.access_token;
   if(opt.json){h['Content-Type']='application/json';opt.body=JSON.stringify(opt.json)}
   const r=await fetch(path,{...opt,headers:h});
   if(r.status==401&&tok&&retry&&!path.startsWith('/auth')){
-    const rr=await fetch('/auth/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({refresh_token:tok.refresh_token})});
-    if(rr.ok){tok=await rr.json();localStorage.tok=JSON.stringify(tok);return api(path,opt,false)}
-    logout();throw Error('auth')}
+    // один общий запрос обновления на все параллельные 401: refresh-токен одноразовый, второй такой же запрос получал отказ и разлогинивал
+    refreshing=refreshing||fetch('/auth/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({refresh_token:tok.refresh_token})})
+      .then(async rr=>{if(!rr.ok)throw Error('auth');tok=await rr.json();localStorage.tok=JSON.stringify(tok)}).finally(()=>refreshing=null);
+    try{await refreshing}catch(e){logout();throw Error('auth')}
+    return api(path,opt,false)}
   const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(typeof d.detail=='string'?d.detail:'error');return d}
 function logout(){if(tok)fetch('/auth/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({refresh_token:tok.refresh_token})});tok=null;user=null;E=null;localStorage.removeItem('tok');clearInterval(timer);$('tm').textContent='';chrome();route()}
 function shell(wide){$('app').className=wide?'wide':'';$('bar').hidden=true;$('pg').hidden=true}
@@ -128,15 +131,17 @@ function go(i){if(i>=0&&i<E.total){E.cur=i;draw(true)}}
 // ответы уходят на сервер строго по очереди: два одновременных запроса могли затереть друг друга (сервер перезаписывает весь словарь ответов)
 function queue(fn){const p=E.chain.then(fn);E.chain=p.catch(()=>{});return p}
 function send(q,i){const id=E.exam_id;return queue(()=>api(`/exams/${id}/answer`,{method:'POST',json:{question_id:q.id,option_index:i}}))}
-async function pick(i){const q=E.questions[E.cur],imm=E.answer_mode=='immediate';if(imm&&(E.res[q.id]||q.id in E.wait))return;
-  E.sel[q.id]=i;if(imm)E.wait[q.id]=1;draw(false);   // выбор подсвечивается сразу, не дожидаясь ответа сервера
-  try{const r=await send(q,i);if(r.correct===undefined)return;E.res[q.id]={correct:r.correct,ci:r.correct_index}}   // режим «в конце»: перерисовывать нечего
-  catch(e){if(E.sel[q.id]!==i)return;delete E.sel[q.id]}finally{delete E.wait[q.id]}
-  if(E&&!E.done)draw(false)}
-async function toggleSave(){const q=E.questions[E.cur],on=E.savedQ.has(q.id),set=v=>v?E.savedQ.add(q.id):E.savedQ.delete(q.id);
+// ex — экзамен, в котором нажали: пока ждём сервер, E может смениться (выход, новый экзамен) или экзамен уже закончен
+async function pick(i){const ex=E;if(ex.done)return;const q=ex.questions[ex.cur],imm=ex.answer_mode=='immediate';if(imm&&(ex.res[q.id]||q.id in ex.wait))return;
+  const prev=ex.sel[q.id];ex.sel[q.id]=i;if(imm)ex.wait[q.id]=1;draw(false);   // выбор подсвечивается сразу, не дожидаясь ответа сервера
+  try{const r=await send(q,i);if(r.correct===undefined)return;ex.res[q.id]={correct:r.correct,ci:r.correct_index}}   // режим «в конце»: перерисовывать нечего
+  catch(e){if(ex.sel[q.id]!==i)return;if(prev==null)delete ex.sel[q.id];else ex.sel[q.id]=prev}   // не дошло -> вернуть прежний выбор
+  finally{delete ex.wait[q.id]}
+  if(E===ex&&!ex.done)draw(false)}
+async function toggleSave(){const ex=E;if(ex.done)return;const q=ex.questions[ex.cur],on=ex.savedQ.has(q.id),set=v=>v?ex.savedQ.add(q.id):ex.savedQ.delete(q.id);
   set(!on);draw(false);   // кнопка переключается сразу; запросы идут в той же очереди, поэтому быстрые нажатия не перепутаются
   try{await queue(()=>api('/saved/'+q.id,{method:on?'DELETE':'POST'}))}
-  catch(e){if(E&&!E.done&&E.savedQ.has(q.id)===!on){set(on);draw(false)}}}   // сервер не принял -> вернуть как было
+  catch(e){if(ex.savedQ.has(q.id)===!on){set(on);if(E===ex&&!ex.done)draw(false)}}}   // сервер не принял -> вернуть как было
 async function finish(){if(E.done)return;E.done=true;clearInterval(timer);$('tm').textContent='';await E.chain;   // дождаться ответов, которые ещё в пути
   const r=await api(`/exams/${E.exam_id}/finish`,{method:'POST'});shell();scrollTo(0,0);
   $('app').innerHTML=`<div class=card><div class=big>${r.correct} ${t('of')} ${r.total}</div><b>${t('wrong')}:</b>
