@@ -226,13 +226,23 @@ def _make_orders(qs):
     return orders
 def _opts(q, e):
     """Варианты вопроса в том порядке, в котором их видит пользователь этого экзамена."""
-    order = (e.option_orders or {}).get(str(q.id)) or range(len(q.options))
+    n = len(q.options or [])
+    order = (e.option_orders or {}).get(str(q.id))
+    if not order or sorted(order) != list(range(n)): order = range(n)   # варианты правили в админке после старта — порядок как в файле
     return [q.options[i] for i in order]
-def _correct(opts): return next(i for i, o in enumerate(opts) if o["correct"])
+def _keys(opts):
+    """Индексы верных вариантов в порядке показа. Пусто — в файле верный не отмечен; бывает и несколько верных."""
+    return [i for i, o in enumerate(opts) if o.get("correct")]
+def _has_key(q): return any(o.get("correct") for o in q.options or [])
+def _verdict(opts, given):
+    """Проверка одного ответа. correct=None — проверить нельзя: у вопроса нет отмеченного верного варианта."""
+    k = _keys(opts)
+    return {"correct": (given in k) if k else None, "correct_index": k[0] if k else None, "correct_indices": k}
 def _public(q, e, include_correct=False):
     opts = _opts(q, e)
     d = {"id": q.id, "file_number": q.number, "text": q.text, "options": [o["text"] for o in opts]}
-    if include_correct: d["correct_index"] = _correct(opts)
+    if include_correct:
+        k = _keys(opts); d["correct_index"] = k[0] if k else None; d["correct_indices"] = k
     return d
 
 @app.post("/exams")
@@ -248,13 +258,20 @@ def start_exam(b: ExamIn, u: User = Depends(current_user), s: Session = Depends(
     ids = [i for (i,) in pool]                         # только id: тексты всего банка тянуть из БД не нужно
     if not ids: raise HTTPException(404, "no questions in range")
     count = max(1, min(b.count, len(ids)))
-    random.shuffle(ids); ids = ids[:count]            # порядок вопросов вразброс
-    qs = _qs(s, ids)
+    random.shuffle(ids)                                # порядок вопросов вразброс
+    # вопросы без отмеченного верного ответа в экзамен не берём (их нельзя проверить) и добираем следующими из пула.
+    # Обычно хватает одного запроса; добор идёт пачками по 500, а не по одному вопросу на запрос
+    qs, i, step = [], 0, count
+    while len(qs) < count and i < len(ids):
+        batch = ids[i:i + step]; i += len(batch); step = 500
+        qs += [q for q in _qs(s, batch) if _has_key(q)]
+    qs = qs[:count]
+    if not qs: raise HTTPException(404, "no questions with a marked answer in range")
     e = Exam(id=uuid.uuid4().hex, user_id=u.id, mode=b.source, answer_mode=b.answer_mode,
-             duration_sec=max(1, min(b.duration_min, 300)) * 60, started=int(time.time()), question_ids=ids, answers={},
-             option_orders=_make_orders(qs) if b.shuffle_options else {})   # порядок вариантов фиксируется на весь экзамен
+             duration_sec=max(1, min(b.duration_min, 300)) * 60, started=int(time.time()), question_ids=[q.id for q in qs],
+             answers={}, option_orders=_make_orders(qs) if b.shuffle_options else {})   # порядок вариантов фиксируется на весь экзамен
     s.add(e); s.commit()
-    return {"exam_id": e.id, "total": count, "duration_sec": e.duration_sec, "answer_mode": e.answer_mode,
+    return {"exam_id": e.id, "total": len(qs), "duration_sec": e.duration_sec, "answer_mode": e.answer_mode,
             "questions": [_public(q, e) for q in qs]}   # правильные ответы НЕ отдаются
 
 def _own(s, eid, u):
@@ -262,6 +279,23 @@ def _own(s, eid, u):
     if not e or e.user_id != u.id: raise HTTPException(404)
     return e
 def _expired(e): return time.time() > e.started + e.duration_sec
+
+@app.get("/exams/{eid}")
+def get_exam(eid: str, u: User = Depends(current_user), s: Session = Depends(db)):
+    """Начатый экзамен целиком — чтобы продолжить его после перезагрузки страницы (iOS Safari сам перезагружает вкладки из фона).
+    Проверка уже данных ответов отдаётся только в режиме «сразу»: там её и так показали при ответе."""
+    e = _own(s, eid, u)
+    qs = _qs(s, e.question_ids)
+    left = {str(q.id) for q in qs}
+    answers = {k: v for k, v in (e.answers or {}).items() if k in left}
+    results = {}
+    if e.answer_mode == "immediate":
+        for q in qs:
+            if str(q.id) in answers: results[str(q.id)] = _verdict(_opts(q, e), answers[str(q.id)])
+    return {"exam_id": e.id, "total": len(qs), "duration_sec": e.duration_sec, "answer_mode": e.answer_mode,
+            "remaining_sec": max(0, int(e.started + e.duration_sec - time.time())),
+            "overdue_sec": max(0, int(time.time() - e.started - e.duration_sec)), "finished": bool(e.finished),
+            "questions": [_public(q, e) for q in qs], "answers": answers, "results": results}
 
 class AnswerIn(BaseModel): question_id: int; option_index: int
 @app.post("/exams/{eid}/answer")
@@ -274,24 +308,26 @@ def answer(eid: str, b: AnswerIn, u: User = Depends(current_user), s: Session = 
     opts = _opts(q, e)
     if not 0 <= b.option_index < len(opts): raise HTTPException(400, "bad option index")
     key = str(b.question_id)
-    if e.answer_mode == "immediate" and key in e.answers: raise HTTPException(409, "already answered")
+    if e.answer_mode == "immediate" and key in e.answers:
+        # ответ уже принят (например, ответ сервера потерялся в сети) — не ошибка: отдаём сохранённый ответ и его проверку
+        return {**_verdict(opts, e.answers[key]), "given_index": e.answers[key], "already": True}
     e.answers = {**e.answers, key: b.option_index}; s.commit()
-    if e.answer_mode == "immediate":
-        ci = _correct(opts)
-        return {"correct": ci == b.option_index, "correct_index": ci}
+    if e.answer_mode == "immediate": return _verdict(opts, b.option_index)
     return {"recorded": True}
 
 @app.post("/exams/{eid}/finish")
 def finish(eid: str, u: User = Depends(current_user), s: Session = Depends(db)):
+    """Итог экзамена. Повторный вызов безопасен (вернёт тот же итог) — им пользуется повтор после обрыва связи и перезагрузка."""
     e = _own(s, eid, u); e.finished = True; s.commit()
     items, wrong = [], []
     for pos, q in enumerate(_qs(s, e.question_ids), 1):
-        ci = _correct(_opts(q, e)); given = e.answers.get(str(q.id))
-        status = "unanswered" if given is None else ("correct" if given == ci else "wrong")
-        if status != "correct": wrong.append({"position": pos, "file_number": q.number, "status": status})
+        k = _keys(_opts(q, e)); given = e.answers.get(str(q.id))
+        # nokey: верный вариант не отмечен (вопрос исправили в админке уже после старта) — в счёт не идёт, а не роняет итог
+        status = "nokey" if not k else "unanswered" if given is None else "correct" if given in k else "wrong"
+        if status in ("wrong", "unanswered"): wrong.append({"position": pos, "file_number": q.number, "status": status})
         items.append({**_public(q, e, True), "position": pos, "given_index": given, "status": status})
     correct = sum(i["status"] == "correct" for i in items)
-    return {"correct": correct, "total": len(items), "wrong": wrong, "items": items}
+    return {"correct": correct, "total": sum(i["status"] != "nokey" for i in items), "wrong": wrong, "items": items}
 
 
 @app.get("/config")
