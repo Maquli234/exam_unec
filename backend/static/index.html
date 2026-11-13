@@ -114,7 +114,8 @@ async function startExam(src){
    E={...r,cur:0,sel:{},res:{},wait:{},chain:Promise.resolve(),savedQ:new Set(ids.ids),end:Date.now()+r.duration_sec*1000,done:false};draw(true);clearInterval(timer);timer=setInterval(tick,1000);tick()}catch(e){alert(e.message)}}
 function tick(){const s=Math.max(0,Math.round((E.end-Date.now())/1000)),h=Math.floor(s/3600);$('tm').textContent=(h?h+':':'')+String(Math.floor(s/60)%60).padStart(2,'0')+':'+String(s%60).padStart(2,'0');if(!s&&!E.done){alert(t('time'));finish()}}
 function draw(toQ){
-  shell();const y=scrollY,q=E.questions[E.cur],imm=E.answer_mode=='immediate',r=E.res[q.id],sel=E.sel[q.id],sv=E.savedQ.has(q.id);
+  // без shell(): если спрятать и снова показать полосу прогресса, Safari сдвигает страницу на 3px при каждом ответе
+  $('app').className='';const y=scrollY,q=E.questions[E.cur],imm=E.answer_mode=='immediate',r=E.res[q.id],sel=E.sel[q.id],sv=E.savedQ.has(q.id);
   const gc=(x,i)=>{const R=E.res[x.id];return(i==E.cur?'g-cur ':'')+(R?(R.correct?'g-ok':'g-bad'):(E.sel[x.id]!=null?'g-ans':''))};
   $('app').innerHTML=`<div class=grid>${E.questions.map((x,i)=>`<button class="${gc(x,i)}" onclick="go(${i})">${i+1}</button>`).join('')}</div>
   <div class=card id=qc><div class=qh>${t('q')} ${E.cur+1} / ${E.total} · №${q.file_number} ${t('inFile')}</div><p class=qt>${esc(q.text)}</p>
